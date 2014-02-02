@@ -33,13 +33,14 @@ end
 action :create do
   create_user_and_group
   create_directories
+  create_config
+  
   if node.platform_family == "rhel" && node.redis.install_type == "package"
     # For RHEL package installs, use the RPM's init script and set REDIS_USER
     create_sysconfig_file  
   else
     create_service_script
   end
-  create_config
   enable_service
   new_resource.updated_by_last_action(true)
 end
@@ -100,7 +101,7 @@ def create_config
     when "init"
       notifies :restart, "service[#{redis_service_name}]"
     when "runit"
-      notifies :restart, "runit_service[#{redis_service_name}]"
+      # do nothing as runit_service will automatically restart service after creation
     end
   end
 end
@@ -136,10 +137,13 @@ def create_service_script
       variables new_resource.to_hash
     end
   when "runit"
-    runit_service "redis" do
+    runit_service redis_service do
+      cookbook "redis"
+      run_template_name "redis"
+      log_template_name "redis"      
       options({
         :name     => new_resource.name,
-        :dst_dir  => new_resource.dst_dir,
+        :dst_dir  => node.redis.dst_dir,
         :conf_dir => new_resource.conf_dir,
         :user     => new_resource.user
       })
@@ -148,15 +152,29 @@ def create_service_script
 end
 
 def enable_service
-  service redis_service do
-    action [ :enable, :start ]
-  end
+  case new_resource.init_style
+  when "init"
+    service redis_service do
+      action [ :enable, :start ]
+    end
+  when "runit"
+    runit_service redis_service do
+      action [ :enable, :start ]
+    end
+  end  
 end
 
 def disable_service
-  service redis_service do
-    action [ :disable, :stop ]
-  end
+  case new_resource.init_style
+  when "init"
+    service redis_service do
+      action [ :disable, :stop ]
+    end
+  when "runit"
+    runit_service redis_service do
+      action [ :disable, :stop ]
+    end
+  end  
 end
 
 def redis_service
